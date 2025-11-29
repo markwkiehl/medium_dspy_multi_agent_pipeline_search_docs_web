@@ -59,6 +59,7 @@ print("'" + Path(__file__).stem + ".py'  v" + __version__)
 #           Introduce a dedicated Raw Content Check Agent that runs immediately after any search (local or web) is executed. 
 #           This agent directly checks the raw, unsummarized data against the user's overall query to bypass the step-level 
 #           agent's decision to ensure the earliest possible termination.
+#           Published on medium.com  https://medium.com/@markwkiehl/building-a-multi-agent-rag-system-with-dspy-d4b497475b83
 
 """ 
 API Requirements:
@@ -95,39 +96,22 @@ from langchain_chroma import Chroma
 
 
 config = {
-    "llm_provider": "openai",                                       # The LLM provider we are using
-    "embedding_model": "text-embedding-3-small",                    # The model for creating document embeddings
-    "max_step_iterations": 3                                        # The maximum number iterations per master plan step. 
+    "llm_provider": "openai",                                           # The LLM provider we are using
+    "embedding_model": "text-embedding-3-small",                        # The model for creating document embeddings
+    "max_step_iterations": 3,                                           # The maximum number iterations per master plan step. 
+    "path_chroma_db": Path(Path.cwd()).joinpath("chroma_langchain_db"), # Folder for the Chroma db vector store
+    "chroma_collection_name": "Biography_of_Christopher_Diaz",          # Chroma db collection name
 }
+
 
 
 # --- Search Local Documents & Utility Functions ---
 
-# --- Configure the Local Documents Chroma db ---
-
-# Define the folder where the Chroma db will store data and the name of the collection.
-path_chroma_db = Path(Path.cwd()).joinpath("chroma_langchain_db")
-collection_name = "Biography_of_Christopher_Diaz"
-
-# Initialize the embedding function using the model specified in our config
-#embedding_function = OpenAIEmbeddings(model=config['embedding_model'])      # Default batch size is typically 1000 and can cause rate limit errors.
-embedding_function = OpenAIEmbeddings(
-        model=config['embedding_model'],
-        #chunk_size=100  # <--- ADD THIS PARAMETER to limit documents per API call.  Lower number causees more independent API calls
-    )
-
-# Reconnect to the vector store
-vector_store = Chroma(
-    collection_name=collection_name,
-    embedding_function=embedding_function,
-    # Without 'persist_directory' argument, db is in memory only. 
-    persist_directory=str(path_chroma_db)
-)
-print(f"Connected Chroma db to collection '{collection_name}' in {path_chroma_db}")
+# --- Search Local Documents & Utility Functions ---
 
 
 # documents for (fake) biography of Christopher Diaz
-def get_docs_christopher_diaz(rebuild_source_files:bool=False, doc_format:str="LangChain", collection_name:str="Biography_of_Christopher_Diaz", verbose:bool=False) -> List[str]:
+def get_docs_christopher_diaz(rebuild_source_files:bool=False, doc_format:str="LangChain", verbose:bool=True) -> List[str]:
     """
     Generates or reads the documents for the Christopher Diaz fake facts.
 
@@ -185,7 +169,7 @@ def get_docs_christopher_diaz(rebuild_source_files:bool=False, doc_format:str="L
         return documents
 
 
-    def build_langchain_chroma_db(path_chroma_db:Path, documents:List[Document], collection_name:str):
+    def build_langchain_chroma_db(path_chroma_db:Path, documents:List[Document], collection_name:str, verbose:bool=True):
         """
         Adds 'documents' to the local Chroma db 'path_chroma_db' with the collection name 'collection_name'.
         
@@ -216,11 +200,11 @@ def get_docs_christopher_diaz(rebuild_source_files:bool=False, doc_format:str="L
             # Without 'persist_directory' argument, db is in memory only. 
             persist_directory=str(path_chroma_db)
         )
-        print(f"Created / connected to Chroma vector store for '{collection_name}' in {path_chroma_db}")
+        if verbose: print(f"Created Chroma vector store for collection '{chroma_collection_name}' in {path_chroma_db}")
 
         # Add 'documents' and 'uuids' to the vector store.
         vector_store.add_documents(documents=documents, ids=uuids)
-        print(f"Advanced vector store created/updated with {vector_store._collection.count()} embeddings.")
+        if verbose: print(f"Chroma db vector store updated with {vector_store._collection.count()} embeddings.")
 
 
     def sanitize_string_collection_name(input_string):
@@ -246,11 +230,19 @@ def get_docs_christopher_diaz(rebuild_source_files:bool=False, doc_format:str="L
 
     filename_base = "christopher_diaz"
 
+    path_chroma_db = config['path_chroma_db']
+    if not isinstance(path_chroma_db, Path): raise Exception("path_chroma_db is not a Path object")
+
+    chroma_collection_name = config['chroma_collection_name']
+
     # Get the Christopher Diaz set of fake facts. 
     path_file_docs = Path(Path.cwd()).joinpath(f"docs_{filename_base}.pickle")
     path_file_docs_collection_name = Path(Path.cwd()).joinpath(f"docs_{filename_base}_collection_name.pickle")
     
     if rebuild_source_files:
+        # Delete folder path_chroma_db
+        if path_chroma_db.is_dir(): shutil.rmtree(path_chroma_db)
+        # Delete Pickle files 
         if path_file_docs.is_file(): path_file_docs.unlink()
         if path_file_docs_collection_name.is_file(): path_file_docs_collection_name.unlink()
     
@@ -269,30 +261,28 @@ def get_docs_christopher_diaz(rebuild_source_files:bool=False, doc_format:str="L
             except Exception as e:
                 print(f"{i}\t{e}")
         
-        print(f"Fetched {len(documents)} documents for 'Christopher Diaz'")
+        if verbose: print(f"Fetched {len(documents)} enriched documents for '{chroma_collection_name.replace('_',' ')}'")
         #print(f"\n{documents[0].metadata}")        # {'language': 'en - English', 'id': 'e0d3bc36-b85f-4ebf-bbd2-6b466980eae3'}
 
         # Write the documents to a local pickle file
         with open(path_file_docs, 'wb') as f:
             pickle.dump(documents, f)
 
-        if verbose: print(f"collection_name: '{collection_name}'")
-
         # Write the collection name to a local pickle file
         with open(path_file_docs_collection_name, 'wb') as f:
-            pickle.dump(collection_name, f)
-
-        # Add 'documents' as 'collection_name' to a Chroma db persisted to the local file 'path_chroma_db'.
-        build_langchain_chroma_db(path_chroma_db, documents, collection_name)
+            pickle.dump(chroma_collection_name, f)
 
     else:
         # Read the Christopher Diaz documents and collection name
         with open(path_file_docs, 'rb') as f:
             documents = pickle.load(f)
         with open(path_file_docs_collection_name, 'rb') as f:
-            collection_name = pickle.load(f)
-        print(f"Read {len(documents)} documents and collection name for {collection_name}")
+            stored_collection_name  = pickle.load(f)
+        if verbose: print(f"Read {len(documents)} documents and collection name '{stored_collection_name}'")
 
+    if rebuild_source_files:
+        # Add 'documents' as 'chroma_collection_name' to a Chroma db persisted to the local file 'path_chroma_db'.
+        build_langchain_chroma_db(path_chroma_db, documents, chroma_collection_name, verbose)
 
     if doc_format == "LangChain": return documents
 
@@ -346,9 +336,24 @@ def search_docs(query: str) -> str:
     # bm25s is a better library.
     # Initialize the BM25 (Sparse) Retriever
     # BM25 is purely keyword-based and is created from the raw text documents.
-    documents = get_docs_christopher_diaz(doc_format="LangChain")
+    documents = get_docs_christopher_diaz(doc_format="LangChain", verbose=False)
     bm25_retriever = BM25Retriever.from_documents(documents)
     bm25_retriever.k = 5    # Return top 5 results
+
+    # Initialize the embedding function using the model specified in our config
+    embedding_function = OpenAIEmbeddings(
+            model=config['embedding_model'],
+            #chunk_size=100  # <--- ADD THIS PARAMETER to limit documents per API call.  Lower number causees more independent API calls
+        )
+
+    # Reconnect to the vector store
+    vector_store = Chroma(
+        collection_name=config['chroma_collection_name'],
+        embedding_function=embedding_function,
+        # Without 'persist_directory' argument, db is in memory only. 
+        persist_directory=str(config['path_chroma_db'])
+    )
+    print(f"Connected Chroma db to collection '{config['chroma_collection_name']}' in {config['path_chroma_db']}")
 
     # Configure the Chroma vector store retriever to return the top 5 results.
     chroma_retriever = vector_store.as_retriever(search_kwargs={"k": 5})
@@ -378,6 +383,7 @@ def search_docs(query: str) -> str:
         docs.append(doc.page_content)
 
     return docs
+
 
 # --- Search Web & Utility Functions ---
 
@@ -777,7 +783,6 @@ class MultiAgentPipeline(dspy.Module):
 
 if __name__ == '__main__':
     pass
-
 
     # --- Define the user query ---
 
