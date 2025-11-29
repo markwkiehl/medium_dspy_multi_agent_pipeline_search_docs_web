@@ -43,6 +43,7 @@ langchain-community
 langchain-chroma
 langchain-openai
 langchain-classic
+rank_bm25
 rich
 
 """
